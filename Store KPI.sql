@@ -14,29 +14,45 @@ ORDER BY hours;
 
 SELECT DATEPART(HOUR, transaction_time) AS hours, COUNT(DISTINCT DATEPART(DAY, transaction_date)) AS day, 
 COUNT(transaction_id) AS transactions, COUNT(DISTINCT sales_outlet_id) AS stores_open, SUM(line_item_amount) AS total_sales 
-from sales
+FROM sales
 GROUP BY DATEPART(HOUR, transaction_time)
 ORDER BY hours;
 
 -- We can see that just one store was open in the early hours, on one day. We will eliminate this from further analysis
 -- as it is erroneous, possibly for a special event. 
 
-SELECT DATEPART(HOUR, transaction_time) AS hours, COUNT(DISTINCT DATEPART(DAY, transaction_date)) AS day, 
+SELECT sales_outlet_id, DATEPART(HOUR, transaction_time) AS hours, COUNT(DISTINCT DATEPART(DAY, transaction_date)) AS day, 
 COUNT(transaction_id) AS transactions, COUNT(DISTINCT sales_outlet_id) AS stores_open, SUM(line_item_amount) AS total_sales 
-from sales
-GROUP BY DATEPART(HOUR, transaction_time) 
+FROM sales
+GROUP BY DATEPART(HOUR, transaction_time), sales_outlet_id 
 HAVING COUNT(DISTINCT DATEPART(DAY, transaction_date)) > 1
 ORDER BY hours
 
--- Using this data, we are able to calculate useful KPI data, such as Average Daily Transactions, Average Transaction Value (ATV)
--- on a per store basis
+-- Taking stock of this data, it is 
+-- Using this data, now need to realise that each transaction could have multiple lines, so using a case statement these have
+-- been collected together. 
+ -- We can now use this to calculate average hourly transactions and transaction values.
 
-with cte as(
-SELECT DATEPART(HOUR, transaction_time) AS hours, COUNT(DISTINCT DATEPART(DAY, transaction_date)) AS day, 
-COUNT(transaction_id) AS transactions, COUNT(DISTINCT sales_outlet_id) AS stores_open, SUM(line_item_amount) AS total_sales 
-from sales
-GROUP BY DATEPART(HOUR, transaction_time) 
-HAVING COUNT(DISTINCT DATEPART(DAY, transaction_date)) > 1
 
-)
-select hours, total_sales/transactions AS ATV, (transactions/stores_open)/day AS hourly_transactions  from cte
+WITH grouped_tran AS
+
+(
+SELECT transaction_id, transaction_date, sales_outlet_id, DATEPART(HOUR, transaction_time) AS hour, 
+CASE WHEN transaction_id = transaction_id AND
+ transaction_date = transaction_date AND
+ sales_outlet_Id = sales_outlet_id THEN SUM(line_item_amount) END AS sales,
+
+CASE WHEN
+
+ sales_outlet_Id = sales_outlet_id THEN COUNT(transaction_id)/ SUM(DISTINCT DATEPART(DAY, transaction_date)) END AS total_transactions ,
+
+ COUNT(DISTINCT sales_outlet_id) AS stores_open
+ FROM sales
+ GROUP BY  DATEPART(HOUR, transaction_time), transaction_id, transaction_date, sales_outlet_id, transaction_time
+
+ )
+  SELECT sales_outlet_id, hour ,COUNT(total_transactions)/hour/sales_outlet_id AS transactions, 
+ CAST(AVG(sales) AS DECIMAL(5,2)) AS ATV from grouped_tran g
+  WHERE hour > 5
+ GROUP BY hour, sales_outlet_id
+ ORDER BY sales_outlet_id, hour
